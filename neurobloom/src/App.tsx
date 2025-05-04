@@ -9,6 +9,8 @@ export default function App() {
   const [agentResponse, setAgentResponse] = useState("");
   const [journalQuery, setJournalQuery] = useState("");
   const [taskQuery, setTaskQuery] = useState("");
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [taskList, setTaskList] = useState([]); // Task list state
   const webcamRef = useRef(null);
   const sessionId = "user_123"; // You can replace this with a dynamic session ID if needed
 
@@ -34,7 +36,6 @@ export default function App() {
       });
 
       const result = await response.json();
-      console.log(result);
       if (result.error) {
         setEmotion("Error");
         setSuggestedAction("Try again");
@@ -42,19 +43,14 @@ export default function App() {
         return;
       }
 
-      console.log(result.emotion.response.data.emotion);
-      // Properly set emotion and suggested action based on response
-      const detectedEmotion = result.emotion.response.data.emotion || "unknown"; // Ensure "emotion" field exists in response
+      const detectedEmotion = result.emotion.response.data.emotion || "unknown"; 
       const suggestedAction = result.emotion.response.data.suggested_action || "Stay focused";
       const journalContent = result.emotion.response.data.journal_content || "No content available";
-      console.log(detectedEmotion);
       setEmotion(detectedEmotion);
       setSuggestedAction(suggestedAction);
+      setTaskQuery(suggestedAction);
       setJournalContent(journalContent);
-
-      // Automatically trigger the journal query with the journalContent
-      handleJournalQuery(journalContent);
-
+      setJournalQuery(journalContent);
     } catch (error) {
       console.error("Emotion detection failed:", error);
       setEmotion("Error");
@@ -71,20 +67,28 @@ export default function App() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ query: query, sessionId })
+        body: JSON.stringify({ query, sessionId })
       });
-
+  
       const result = await response.json();
-      console.log(result);
-      const journalQuery = result.response.content || "No response from journal agent.";
-      setAgentResponse(journalQuery);
-      console.log(journalQuery);
+      const journalResponse = result.response.content || "No response from journal agent.";
+  
+      // Save the entry
+      setJournalEntries(prev => [...prev, { input: query, response: journalResponse }]);
+      setJournalQuery(""); // Clear text field
     } catch (error) {
       console.error("Journal query failed:", error);
-      setAgentResponse(`Error: ${error.message}`);
+      setAgentResponse(`Error: ${error.message}`); // Keep error here optionally
     }
   };
-  // Handle Task Query
+
+  const handleSimpleJournalSubmit = () => {
+    if (!journalQuery.trim()) return;
+    setJournalEntries(prev => [...prev, { input: journalQuery, response: "" }]);
+    setJournalQuery("");
+  };
+  
+  // Handle Task Query and Add Task to List
   const handleTaskQuery = async () => {
     try {
       const response = await fetch("http://localhost:8000/agent/task", {
@@ -97,8 +101,52 @@ export default function App() {
 
       const result = await response.json();
       setAgentResponse(result.response || "No response from task agent.");
+
+      // Add task to task list
+      const newTask = {
+        id: Date.now(),
+        query: taskQuery,
+        response: result.response || "No response",
+        isExecuted: false // Track task execution status
+      };
+
+      setTaskList(prev => [...prev, newTask]);
+      setTaskQuery(""); // Clear task input
     } catch (error) {
       console.error("Task query failed:", error);
+      setAgentResponse(`Error: ${error.message}`);
+    }
+  };
+
+  // Execute Task
+  const executeTask = async (taskId) => {
+    try {
+      // Find the task to execute
+      const task = taskList.find(task => task.id === taskId);
+      if (!task) return;
+
+      // Mark the task as executed
+      setTaskList(prevTasks => 
+        prevTasks.map(task => 
+          task.id === taskId ? { ...task, isExecuted: true } : task
+        )
+      );
+
+      // Execute the task by calling an API or performing an action
+      const response = await fetch("http://localhost:8000/agent/execute", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ taskQuery: task.query, sessionId })
+      });
+
+      const result = await response.json();
+      setAgentResponse(result.response || "No response from task agent.");
+      
+      // Optionally, update task execution status or add details here
+    } catch (error) {
+      console.error("Task execution failed:", error);
       setAgentResponse(`Error: ${error.message}`);
     }
   };
@@ -138,29 +186,55 @@ export default function App() {
       {/* Journal Input and Response */}
       <div className="mb-8">
         <textarea
-          value={journalQuery} // This will hold the user input or agent's response
-          onChange={(e) => setJournalQuery(e.target.value)} // Update the journal query state
+          value={journalQuery}
+          onChange={(e) => setJournalQuery(e.target.value)}
           placeholder="Write something for your journal..."
           className="w-full p-4 border border-gray-300 rounded-lg shadow-md mb-2"
         />
         <button
-          onClick={() => handleJournalQuery(journalQuery)} // Pass the current journalQuery to the handler
+          onClick={handleSimpleJournalSubmit}
           className="px-4 py-2 bg-green-600 text-white rounded-xl shadow"
         >
           Submit Journal
         </button>
+        <button
+          onClick={async () => {
+            try {
+              const response = await fetch("http://localhost:8000/agent/journal", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ query: journalQuery, sessionId })
+              });
 
-        {/* Optionally, show a message after the response */}
-        {agentResponse && (
-          <div className="mt-4 p-3 bg-white rounded-lg shadow">
-            <h3 className="font-bold mb-1">System Response:</h3>
-            <p className="text-gray-700">{agentResponse}</p>
+              const result = await response.json();
+              const journalResponse = result.response.content || "No response from journal agent.";
+              setJournalQuery(prev => `${prev}\n\n${journalResponse}`);
+            } catch (error) {
+              console.error("AI augment failed:", error);
+              setAgentResponse(`Error: ${error.message}`);
+            }
+          }}
+          className="ml-2 px-4 py-2 bg-purple-600 text-white rounded-xl shadow"
+        >
+          AI Add to Journal
+        </button>
+
+        {/* Display Journal Entries */}
+        {journalEntries.length > 0 && (
+          <div className="mt-4 space-y-4">
+            <h3 className="font-bold text-lg">Journal History</h3>
+            {journalEntries.map((entry, index) => (
+              <div key={index} className="p-3 bg-white rounded-lg shadow">
+                <p className="text-gray-800 font-semibold">You:</p>
+                <p className="mb-2 text-gray-700">{entry.input}</p>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-
-      {/* Task Input */}
       {/* Task Input and Response */}
       <div className="mb-8">
         <textarea
@@ -177,13 +251,28 @@ export default function App() {
         </button>
       </div>
 
-      {/* Display agent responses */}
-      {agentResponse && (
-        <div className="mt-4 p-3 bg-white rounded-lg shadow">
-          <h3 className="font-bold mb-1">System Response:</h3>
-          <p className="text-gray-700">{agentResponse}</p>
-        </div>
-      )}
+      {/* Display Task List */}
+      <div className="mt-4">
+        {taskList.length > 0 && (
+          <div className="space-y-4">
+            <h3 className="font-bold text-lg">Task List</h3>
+            {taskList.map((task) => (
+              <div key={task.id} className="p-3 bg-white rounded-lg shadow">
+                <p className="text-gray-800 font-semibold">{task.query}</p>
+                <button
+                  onClick={() => executeTask(task.id)}
+                  className="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg"
+                >
+                  Execute Task
+                </button>
+                {task.isExecuted && (
+                  <p className="mt-2 text-gray-700 text-green-600">Task executed successfully!</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

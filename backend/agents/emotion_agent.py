@@ -74,17 +74,24 @@ class EmotionAgent:
         }
 
     def get_journal_content(self, emotion: str) -> str:
-        """Generate journal content based on the detected emotion."""
-        if emotion == "Happy":
-            return "Write about something that brought you joy today!"
-        elif emotion == "Sad":
-            return "Consider writing about what made you feel down and how you can improve."
-        elif emotion == "Angry":
-            return "Reflect on what triggered your anger and explore ways to manage it."
-        elif emotion == "Surprised":
-            return "Jot down what surprised you and how it made you feel."
+        """Generate journal content prompt based on the detected emotion."""
+        # Normalize the emotion string to lowercase for case-insensitive comparison
+        emotion = emotion.lower()
+
+        if emotion == "happy":
+            return "Capture what made you smile today."
+        elif emotion == "sad":
+            return "Write about what's weighing on you and how you're coping."
+        elif emotion == "angry":
+            return "Explore what sparked your anger and how it affected you."
+        elif emotion == "surprise":
+            return "Describe the moment that caught you off guard."
+        elif emotion == "fear":
+            return "Reflect on what’s making you anxious and what might ease it."
+        elif emotion == "disgust":
+            return "Journal about what bothered you and why it had that effect."
         else:
-            return "Take a moment to reflect on your current state and any changes you might want to make."
+            return "Take a moment to write freely about how you're feeling."
 
     async def stream(self, image_path: str, sessionId: str) -> AsyncIterable[Dict[str, Any]]:
         # First, detect emotion from the image
