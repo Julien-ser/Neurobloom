@@ -11,7 +11,8 @@ from datetime import datetime
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
+ASSETS_FOLDER = os.path.join(os.path.dirname(__file__), 'assets')
+NOTES_FILE_PATH = os.path.join(ASSETS_FOLDER, "notes.txt")
 # Simple in-memory checkpointing
 memory = MemorySaver()
 
@@ -24,18 +25,32 @@ def write_journal_entry(reflection: str) -> str:
 
     today = datetime.now().strftime("%A, %B %d, %Y")
 
-    # Create a local Gemini model instance
     tmodel = ChatGoogleGenerativeAI(
         model="gemini-2.0-flash",
         google_api_key=os.getenv("GOOGLE_API_KEY")
     )
 
-    # Prompt to get a natural journal-style entry
+    # === Step 1: Read notes.txt and summarize if it exists ===
+    summary_context = ""
+    if os.path.exists(NOTES_FILE_PATH):
+        with open(NOTES_FILE_PATH, "r", encoding="utf-8") as f:
+            all_entries = f.read().strip()
+            if all_entries:
+                # Summarize entries using Gemini
+                summary_prompt = (
+                    "Summarize the following journal entries into a short paragraph. "
+                    "Keep it introspective and avoid repetition. Focus on emotional themes, trends, and personal growth.\n\n"
+                    f"{all_entries}"
+                )
+                summary_response = tmodel.invoke(summary_prompt)
+                summary_context = summary_response.content.strip()
+
+    # === Step 2: Write journal entry with summary as context ===
     prompt = (
-        "Convert this reflection into a thoughtful first-person journal entry. "
-        "Avoid adding a greeting or date. Be natural, expressive, and introspective.\n\n"
-        f"Reflection: {reflection}\n\n"
-        "Journal Entry:"
+        "You are a journaling assistant.\n"
+        f"Here is a summary of past journal themes:\n{summary_context}\n\n"
+        f"Now write a new journal entry based on this reflection:\n{reflection}\n\n"
+        "Write in the first person, as a thoughtful and introspective journal entry. Avoid repeating past themes unless relevant."
     )
 
     response = tmodel.invoke(prompt)
@@ -49,8 +64,11 @@ def write_journal_entry(reflection: str) -> str:
         "—Me"
     )
 
-    print("Generated Entry:", entry)  # TEMP debug
+    with open(NOTES_FILE_PATH, "a", encoding="utf-8") as f:
+        f.write(entry + "\n\n")
+
     return entry
+
 
 
 class ResponseFormat(BaseModel):

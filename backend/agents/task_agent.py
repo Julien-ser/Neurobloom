@@ -1,9 +1,9 @@
+import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
-import os
 from dotenv import load_dotenv
-from typing import Dict, Any
+import webbrowser
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -12,9 +12,10 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 memory = MemorySaver()
 
 # Asset paths
-ASSETS_FOLDER = "assets"
-NOTES_FILE_PATH = os.path.join(ASSETS_FOLDER, "Notes.txt")
-JOB_LIST_PATH = os.path.join(ASSETS_FOLDER, "Job_List.csv")
+ASSETS_FOLDER = os.path.join(os.path.dirname(__file__), 'assets')
+NOTES_FILE_PATH = os.path.join(ASSETS_FOLDER, "notes.txt")
+JOB_LIST_PATH = os.path.join(ASSETS_FOLDER, "jobs.xls")
+WORKOUT_ROUTINE_PATH = os.path.join(ASSETS_FOLDER, "workout.txt")
 
 # Open file helper
 def open_file(file_type: str):
@@ -22,7 +23,7 @@ def open_file(file_type: str):
     Opens the specified file based on its type.
     
     Args:
-        file_type (str): The type of file to open, either "notes" or "job_list".
+        file_type (str): The type of file to open, either "notes", "job_list", or "workout".
     
     Returns:
         dict: A dictionary containing the result of the file open operation.
@@ -30,10 +31,13 @@ def open_file(file_type: str):
     print(f"Attempting to open file of type: {file_type}")
     file_paths = {
         "notes": NOTES_FILE_PATH,
-        "job_list": JOB_LIST_PATH
+        "job_list": JOB_LIST_PATH,
+        "workout": WORKOUT_ROUTINE_PATH,
+        "study": "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\OneNote.lnk"
     }
     
     file_path = file_paths.get(file_type.lower())
+    print("TRYING TO OPEN FILE:", file_path)
     if not file_path or not os.path.exists(file_path):
         return {"error": f"{file_type.capitalize()} file not found."}
     
@@ -44,48 +48,62 @@ def open_file(file_type: str):
         return {"error": f"Failed to open {file_type} file. Error: {str(e)}"}
 
 # Task-related tools
-def open_task(task_id: str):
+def handle_task_category(category: str):
     """
-    Opens the specified task based on its task ID.
+    Handles a specific category of task by invoking appropriate actions.
     
     Args:
-        task_id (str): The ID of the task to open.
+        category (str): The category of task (e.g., 'relaxing videos', 'job applications', etc.)
     
     Returns:
-        dict: A dictionary containing the details of the opened task.
+        dict: The result of the task action.
     """
-    print(f"Opening task with ID: {task_id}")
-    return {"task_details": f"Opening task {task_id}. [Details would go here.]"}
-
-def list_tasks():
-    """
-    Lists all available tasks.
+    print(f"Handling task for category: {category}")
     
-    Returns:
-        dict: A dictionary containing a list of available tasks.
-    """
-    print("Listing all tasks")
-    return {"tasks": ["Task 1", "Task 2", "Task 3"]}
+    if category == "relaxing videos":
+        webbrowser.open("https://www.youtube.com/watch?v=tr2qv6_aDeo")
+        return {"action": "Searching for relaxing videos..."}
+    elif category == "job applications":
+        webbrowser.open("https://www.linkedin.com/feed/")
+        return open_file("job_list")#{"action": "Opening LinkedIn and job list..."}
+    elif category == "study material":
+        return open_file("study")
+        #return {"action": "Displaying study material..."}
+    elif category == "motivational content":
+        webbrowser.open("https://www.youtube.com/watch?v=TgHcTailbao")
+        return {"action": "Fetching motivational content..."}
+    elif category == "workout routine":
+        print("Opening workout routine file...")
+        return open_file("workout")
+    elif category == "notes file":
+        print("Opening notes file...")
+        return open_file("notes")
+    else:
+        return {"error": "Unrecognized category."}
 
 class TaskAgent:
     SYSTEM_INSTRUCTION = (
-        "You are a task management assistant. You can open tasks, list tasks, open files, and list files."
+        "You are a task management assistant. You will categorize input prompts and execute tasks like opening files, "
+        "searching for videos, or providing study materials based on the user's request."
     )
+
+    CATEGORIES = [
+        "relaxing videos", "job applications", "study material", 
+        "motivational content", "workout routine", "notes file"
+    ]
 
     def __init__(self):
         # Initialize model and tools
         self.model = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY)
-        self.tools = [open_task, list_tasks, open_file]
-
-        # Create the React agent with the provided tools
+        self.tools = [handle_task_category]
         self.graph = create_react_agent(
             self.model, tools=self.tools, checkpointer=memory,
             prompt=self.SYSTEM_INSTRUCTION
         )
 
-    def invoke(self, query: str, sessionId: str) -> Dict[str, Any]:
+    def invoke(self, query: str, sessionId: str):
         """
-        Invokes the task agent to process a query and returns a structured response.
+        Classifies the input query and executes the corresponding task based on the category.
         
         Args:
             query (str): The user query to be processed by the task agent.
@@ -95,45 +113,34 @@ class TaskAgent:
             dict: A dictionary containing the task completion status and response content.
         """
         print(f"Invoking agent with query: {query} and sessionId: {sessionId}")
-        config = {"configurable": {"thread_id": sessionId}}
-        result = self.graph.invoke({"messages": [("user", query)]}, config)
-        print(f"Result of invoke: {result}")
-        return self.get_agent_response(config)
+        
+        # Classify input query into one of the categories
+        category = self.classify_input(query)
+        result = handle_task_category(category)
+        return result
 
-    def get_agent_response(self, config):
+    def classify_input(self, query: str):
         """
-        Extracts the response from the agent's state.
+        Classifies the user's query into one of the predefined categories.
         
         Args:
-            config (dict): The configuration passed to the agent for retrieving the state.
+            query (str): The user query to be classified.
         
         Returns:
-            dict: The structured response containing task completion status and message.
+            str: The category that matches the query most closely.
         """
-        print(f"Getting agent response for config: {config}")
-        current_state = self.graph.get_state(config)
-        print(f"Current state: {current_state}")
-        structured_response = current_state.values.get('structured_response', {})
-        
-        return {
-            "is_task_complete": structured_response.get('status') == "completed",
-            "require_user_input": structured_response.get('status') == "input_required",
-            "content": structured_response.get('message', "I couldn't complete your request.")
-        }
-
-    SUPPORTED_CONTENT_TYPES = ["text", "text/plain"]
-
-# Example of usage
-if __name__ == "__main__":
-    agent = TaskAgent()
-    response = agent.invoke("List tasks", "session_1")
-    print(response)
-
-    response = agent.invoke("Open task 1", "session_1")
-    print(response)
-
-    response = agent.invoke("Open the Notes file", "session_1")
-    print(response)
-
-    response = agent.invoke("Open the Job List file", "session_1")
-    print(response)
+        # Simple keyword-based classification (you can replace this with a more advanced classifier if needed)
+        if any(keyword in query.lower() for keyword in ["relax", "calm", "meditation", "chill"]):
+            return "relaxing videos"
+        elif any(keyword in query.lower() for keyword in ["job", "application", "linkedin", "resume"]):
+            return "job applications"
+        elif any(keyword in query.lower() for keyword in ["study", "material", "notes", "revision"]):
+            return "study material"
+        elif any(keyword in query.lower() for keyword in ["motivation", "inspire", "encourage", "push"]):
+            return "motivational content"
+        elif any(keyword in query.lower() for keyword in ["workout", "exercise", "fitness", "routine"]):
+            return "workout routine"
+        elif any(keyword in query.lower() for keyword in ["notes", "file", "documents"]):
+            return "notes file"
+        else:
+            return "notes file"  # Default category
